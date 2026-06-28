@@ -19,11 +19,12 @@ permissions:
   contents: write
 
 env:
-# game
-  DEFAULT_DDING_SECRET: 'SECbe4003c4d14c740788cf9383fa1d8d77c029a03e6df99dde528274b9bcc17926'
-  DEFAULT_DDING_TOKEN: 'fd87df4f83611b4c4cf31d5ad48f890f9603b57b1cac3d52fb80df8b86a5b629'
   GH_TOKEN: ${{ github.token }}
   GITHUB_TOKEN: ${{ github.token }}
+  ZIP_PASSWORD: ${{ secrets.ZIP_PASSWORD }}
+  DDING_SECRET: ${{ secrets.DDING_SECRET }}
+  DDING_TOKEN: ${{ secrets.DDING_TOKEN }}
+  DOWNLOAD_PROXY: ${{ secrets.DOWNLOAD_PROXY }}
 jobs:
   init:
     if: github.repository_owner == 'quickprint-soft'
@@ -52,20 +53,25 @@ jobs:
 
       - name: Install dding on non-Windows
         if: runner.os != 'Windows'
+        env:
+          DDING_SECRET_INPUT: ${{ github.event.client_payload.dding_secret || env.DDING_SECRET }}
+          DDING_TOKEN_INPUT: ${{ github.event.client_payload.dding_token || env.DDING_TOKEN }}
         run: |
           pip install dding
-          mkdir -p ~/.dding
-          dding_secret="${{ github.event.client_payload.dding_secret || env.DEFAULT_DDING_SECRET }}"
-          dding_token="${{ github.event.client_payload.dding_token || env.DEFAULT_DDING_TOKEN }}"
-          cat <<EOF > ~/.dding/config.json
-          [
-              {
-                  "group": "default",
-                  "secret": "$dding_secret",
-                  "token": "$dding_token"
-              }
-          ]
-          EOF
+          if [ -n "$DDING_SECRET_INPUT" ] && [ -n "$DDING_TOKEN_INPUT" ]; then
+            mkdir -p ~/.dding
+            cat <<EOF > ~/.dding/config.json
+            [
+                {
+                    "group": "default",
+                    "secret": "$DDING_SECRET_INPUT",
+                    "token": "$DDING_TOKEN_INPUT"
+                }
+            ]
+            EOF
+          else
+            echo "Skipping dding config: DDING_SECRET/DDING_TOKEN not set"
+          fi
           
           
       - name: Use Node.js ${{ matrix.node-version }}
@@ -118,7 +124,6 @@ jobs:
         env:
           KEY: ${{ secrets.SSH_KEY }}
         run: |
-          echo $KEY
           mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
@@ -257,20 +262,25 @@ jobs:
   
         - name: Install dding on non-Windows
           if: runner.os != 'Windows'
+          env:
+            DDING_SECRET_INPUT: ${{ github.event.client_payload.dding_secret || env.DDING_SECRET }}
+            DDING_TOKEN_INPUT: ${{ github.event.client_payload.dding_token || env.DDING_TOKEN }}
           run: |
             pip install dding
-            mkdir -p ~/.dding
-            dding_secret="${{ github.event.client_payload.dding_secret || env.DEFAULT_DDING_SECRET }}"
-            dding_token="${{ github.event.client_payload.dding_token || env.DEFAULT_DDING_TOKEN }}"
-            cat <<EOF > ~/.dding/config.json
-            [
-                {
-                    "group": "default",
-                    "secret": "$dding_secret",
-                    "token": "$dding_token"
-                }
-            ]
-            EOF
+            if [ -n "$DDING_SECRET_INPUT" ] && [ -n "$DDING_TOKEN_INPUT" ]; then
+              mkdir -p ~/.dding
+              cat <<EOF > ~/.dding/config.json
+              [
+                  {
+                      "group": "default",
+                      "secret": "$DDING_SECRET_INPUT",
+                      "token": "$DDING_TOKEN_INPUT"
+                  }
+              ]
+              EOF
+            else
+              echo "Skipping dding config: DDING_SECRET/DDING_TOKEN not set"
+            fi
   
   
         - name: Get current branch name
@@ -310,7 +320,6 @@ jobs:
             # PROT: ${{ secrets.PROT }}
             # MKDIRTEST: ${{ secrets.MKDIRTEST }}
           run: |
-            echo $KEY
             mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
             ssh-keyscan github.com >> ~/.ssh/known_hosts
             
@@ -327,7 +336,11 @@ jobs:
             $repoName = $env:GITHUB_REPOSITORY.Split('/')[-1]
             
             Write-Host "Workflow succeeded for $repoName!"
-            dding "github action success :) for quickprint"
+            if (Test-Path "$HOME/.dding/config.json") {
+              dding "github action success :) for quickprint"
+            } else {
+              Write-Host "Skipping dding notification: config not found"
+            }
           
 
         - name: Check Status
@@ -336,4 +349,8 @@ jobs:
           run: |
             $repoName = $env:GITHUB_REPOSITORY.Split('/')[-1]
             Write-Host "Workflow failed for $repoName!"
-            dding "github action fail :( quickprint"
+            if (Test-Path "$HOME/.dding/config.json") {
+              dding "github action fail :( quickprint"
+            } else {
+              Write-Host "Skipping dding notification: config not found"
+            }
