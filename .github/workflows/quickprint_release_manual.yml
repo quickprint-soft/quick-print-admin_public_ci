@@ -132,14 +132,11 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'release' || github.event_name == 'repository_dispatch' || github.event_name == 'workflow_dispatch'
     name: Backend go
     runs-on: macos-latest
-    strategy:
-      matrix:
-        go-version: [1.22]
     steps:
-      - name: Set up Go ${{ matrix.go-version }}
+      - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version-file: ./quick-print-admin/server/go.mod
         id: go
 
       - name: Check out branch
