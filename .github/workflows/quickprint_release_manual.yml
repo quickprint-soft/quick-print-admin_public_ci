@@ -60,15 +60,7 @@ jobs:
           pip install dding
           if [ -n "$DDING_SECRET_INPUT" ] && [ -n "$DDING_TOKEN_INPUT" ]; then
             mkdir -p ~/.dding
-            cat <<EOF > ~/.dding/config.json
-            [
-                {
-                    "group": "default",
-                    "secret": "$DDING_SECRET_INPUT",
-                    "token": "$DDING_TOKEN_INPUT"
-                }
-            ]
-            EOF
+            printf '[\n  {\n    "group": "default",\n    "secret": "%s",\n    "token": "%s"\n  }\n]\n' "$DDING_SECRET_INPUT" "$DDING_TOKEN_INPUT" > ~/.dding/config.json
           else
             echo "Skipping dding config: DDING_SECRET/DDING_TOKEN not set"
           fi
@@ -224,7 +216,6 @@ jobs:
         env:
           KEY: ${{ secrets.SSH_KEY }}
         run: |
-          echo $KEY
           mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
@@ -269,15 +260,7 @@ jobs:
             pip install dding
             if [ -n "$DDING_SECRET_INPUT" ] && [ -n "$DDING_TOKEN_INPUT" ]; then
               mkdir -p ~/.dding
-              cat <<EOF > ~/.dding/config.json
-              [
-                  {
-                      "group": "default",
-                      "secret": "$DDING_SECRET_INPUT",
-                      "token": "$DDING_TOKEN_INPUT"
-                  }
-              ]
-              EOF
+              printf '[\n  {\n    "group": "default",\n    "secret": "%s",\n    "token": "%s"\n  }\n]\n' "$DDING_SECRET_INPUT" "$DDING_TOKEN_INPUT" > ~/.dding/config.json
             else
               echo "Skipping dding config: DDING_SECRET/DDING_TOKEN not set"
             fi
