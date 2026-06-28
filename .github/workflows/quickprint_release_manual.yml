@@ -1,91 +1,325 @@
-name: QuickPrint Release Manual
+name: CI
 
 on:
-  workflow_dispatch:
-    inputs:
-      target_branch:
-        description: Branch to build from quick-print-admin
-        required: true
-        default: main
-        type: string
-
-concurrency:
-  group: quickprint-release-manual-${{ github.event.inputs.target_branch || github.ref_name }}
-  cancel-in-progress: true
-
+  repository_dispatch:
+    types:
+      - quick-print-admin_public_ci
+  push:
+    branches: [ '*' ]
+  pull_request:
+  # release:
+  #   types: [ created, edited ]
+  # workflow_dispatch:
+  #   inputs:
+  #     gva_version:
+  #       required: true
+  #       type: string
+env:
+# game
+  DEFAULT_DDING_SECRET: 'SECbe4003c4d14c740788cf9383fa1d8d77c029a03e6df99dde528274b9bcc17926'
+  DEFAULT_DDING_TOKEN: 'fd87df4f83611b4c4cf31d5ad48f890f9603b57b1cac3d52fb80df8b86a5b629'
 jobs:
-  release:
+  init:
+    if: github.repository_owner == 'quickprint-soft'
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.MYUSER_TOKEN }}
-      MYUSER_TOKEN: ${{ secrets.MYUSER_TOKEN }}
+    steps:
+      - name: init
+        run: |
+          echo "quickprint-soft"
+
+
+  frontend:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'release'  || github.event_name == 'repository_dispatch'
+    name: Frontend node ${{ matrix.node-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.16.0]
     steps:
       - name: Check out branch
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
+        uses: actions/checkout@v2
 
       - name: Clone myutils
         run: |
-          git clone https://oauth2:${{ secrets.CHARLES_GITHUB_TOKEN }}@github.com/charlessoft/myutils.git ./myutils
+          git clone https://oauth2:${{ secrets.CHARLES_GITHUB_TOKEN  }}@github.com/charlessoft/myutils.git ./myutils
 
-      - name: Prepare branch env
+
+      - name: Install dding on non-Windows
+        if: runner.os != 'Windows'
         run: |
-          CURRENT_BRANCH="${{ github.event.inputs.target_branch }}"
-          echo "BRANCH=refs/heads/${CURRENT_BRANCH}" >> $GITHUB_ENV
+          pip install dding
+          mkdir -p ~/.dding
+          dding_secret="${{ github.event.client_payload.dding_secret || env.DEFAULT_DDING_SECRET }}"
+          dding_token="${{ github.event.client_payload.dding_token || env.DEFAULT_DDING_TOKEN }}"
+          cat <<EOF > ~/.dding/config.json
+          [
+              {
+                  "group": "default",
+                  "secret": "$dding_secret",
+                  "token": "$dding_token"
+              }
+          ]
+          EOF
+          
+          
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+
+
+      - name: Get current branch name
+        id: get_branch
+        run: |
+          echo "BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
           echo "BOOTSTRAP_UTILS_DIR=${PWD}/myutils" >> $GITHUB_ENV
           echo "UTILS_DIR=${PWD}/quick-print-admin/myutils" >> $GITHUB_ENV
           echo "WORK_ROOT_DIR=${PWD}/quick-print-admin" >> $GITHUB_ENV
+          echo "==========="
+          echo $(git rev-parse --abbrev-ref HEAD)
+          echo "==========="
 
       - name: Prepare quickprint-admin workspace
+        env:
+          MYUSER_TOKEN: ${{ secrets.MYUSER_TOKEN }}
         run: |
           echo "export BRANCH=$BRANCH" > ./myutils/.clone_code.env
           echo "export UTILS_DIR=$BOOTSTRAP_UTILS_DIR" >> ./myutils/.clone_code.env
-          echo "export MYUSER_TOKEN=${{ secrets.MYUSER_TOKEN }}" >> ./myutils/.clone_code.env
+          cat ./myutils/.clone_code.env
           bash ./myutils/quickprint/scripts/clone_code.sh ./myutils/.clone_code.env
 
       - name: Generate JENKINS.env
         run: |
-          echo "export BRANCH=$BRANCH" >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export BRANCH=$BRANCH " >> $WORK_ROOT_DIR/.JENKINS.env
           echo "export UTILS_DIR=$UTILS_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
           echo "export WORK_ROOT_DIR=$WORK_ROOT_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
-          echo "export MYUSER_TOKEN=${{ secrets.MYUSER_TOKEN }}" >> $WORK_ROOT_DIR/.JENKINS.env
           cat $WORK_ROOT_DIR/.JENKINS.env
+        working-directory: ./quick-print-admin
 
-      - name: Prepare web metadata
+      - name: Generate git commit
         run: |
-          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_web.sh $WORK_ROOT_DIR/.JENKINS.env
+           bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_web.sh $WORK_ROOT_DIR/.JENKINS.env
 
-      - name: Build web
+      - name: Build test
         run: |
           npm install
           npm run build
         working-directory: ./quick-print-admin/web
 
-      - name: Publish web
+
+        
+      - name: Set SSH
+        env:
+          KEY: ${{ secrets.SSH_KEY }}
         run: |
+          echo $KEY
+          mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      # - name: Setup Debug Session
+      #   uses: csexton/debugger-action@master
+
+      - name: publish web
+        run: |
+          # echo ${{ env.branch_name }} 
+          # echo "export BRANCH=${{ env.branch_name }} " >> .JENKINS.env
+          # find . -name "publish_web.sh"
+          # echo "================="
+          # cat .JENKINS.env
           bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_web.sh $WORK_ROOT_DIR/.JENKINS.env
 
-      - name: Build server
-        run: |
-          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_server.sh $WORK_ROOT_DIR/.JENKINS.env
+  backend:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'release' || github.event_name == 'repository_dispatch'
+    name: Backend go
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        go-version: [1.22]
+    steps:
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{ matrix.go-version }}
+        id: go
 
-      - name: Publish server
-        run: |
-          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_server.sh $WORK_ROOT_DIR/.JENKINS.env
+      - name: Check out branch
+        uses: actions/checkout@v2
 
-      - name: Build agent
-        run: |
-          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_agent.sh $WORK_ROOT_DIR/.JENKINS.env
 
-      - name: Publish agent
+      - name: Clone myutils
         run: |
-          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_agent.sh $WORK_ROOT_DIR/.JENKINS.env
+          git clone https://oauth2:${{ secrets.CHARLES_GITHUB_TOKEN  }}@github.com/charlessoft/myutils.git ./myutils
+          
+
+
+      - name: Get current branch name
+        id: get_branch
+        run: |
+          echo "BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+          echo "BOOTSTRAP_UTILS_DIR=${PWD}/myutils" >> $GITHUB_ENV
+          echo "UTILS_DIR=${PWD}/quick-print-admin/myutils" >> $GITHUB_ENV
+          echo "WORK_ROOT_DIR=${PWD}/quick-print-admin" >> $GITHUB_ENV
+          echo "==========="
+          echo $(git rev-parse --abbrev-ref HEAD)
+          echo "==========="
+
+      - name: Prepare quickprint-admin workspace
+        env:
+          MYUSER_TOKEN: ${{ secrets.MYUSER_TOKEN }}
+        run: |
+          echo "export BRANCH=$BRANCH" > ./myutils/.clone_code.env
+          echo "export UTILS_DIR=$BOOTSTRAP_UTILS_DIR" >> ./myutils/.clone_code.env
+          cat ./myutils/.clone_code.env
+          bash ./myutils/quickprint/scripts/clone_code.sh ./myutils/.clone_code.env
+
+      - name: Generate JENKINS.env
+        run: |
+          echo "export BRANCH=$BRANCH " >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export UTILS_DIR=$UTILS_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export WORK_ROOT_DIR=$WORK_ROOT_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+          cat $WORK_ROOT_DIR/.JENKINS.env
+        working-directory: ./quick-print-admin
+
+
+      - name: Download dependencies
+        run: |
+          make build-server-local
+        working-directory: ./quick-print-admin
+
+      # - name: Download dependencies
+      #   run: |
+      #     go get -v -t -d ./...
+      #     if [ -f Gopkg.toml ]; then
+      #         curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+      #         dep ensure
+      #     fi
+      #   working-directory: ./quick-print-admin/server
+
+      # - name: Test and Build
+      #   run: |
+      #     go build -v -race
+      #     make 
+      #     mv server quickprintserver && tar zcvf quickprintserver.tar.gz quickprintserver ./config.yaml ./resource 
+      #   working-directory: ./quick-print-admin/
+
+
+
+
+      - name: Set SSH
+        env:
+          KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          echo $KEY
+          mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+
+
+
+
+
+      - name: publish server
+        run: |
+          bash ./quick-print-admin/myutils/quickprint/scripts/publish_server.sh $WORK_ROOT_DIR/.JENKINS.env
+
+
+
+  deploy:
+      if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'release'  || github.event_name == 'repository_dispatch'
+      name:  deploy
+      runs-on: ubuntu-latest
+      needs:
+        - init
+        - backend
+        - frontend
+      steps:
+        - name: Check out branch
+          uses: actions/checkout@v2
+  
+        - name: Clone myutils
+          run: |
+            git clone https://oauth2:${{ secrets.CHARLES_GITHUB_TOKEN  }}@github.com/charlessoft/myutils.git ./myutils
+  
+  
+        - name: Install dding on non-Windows
+          if: runner.os != 'Windows'
+          run: |
+            pip install dding
+            mkdir -p ~/.dding
+            dding_secret="${{ github.event.client_payload.dding_secret || env.DEFAULT_DDING_SECRET }}"
+            dding_token="${{ github.event.client_payload.dding_token || env.DEFAULT_DDING_TOKEN }}"
+            cat <<EOF > ~/.dding/config.json
+            [
+                {
+                    "group": "default",
+                    "secret": "$dding_secret",
+                    "token": "$dding_token"
+                }
+            ]
+            EOF
+  
+  
+        - name: Get current branch name
+          id: get_branch
+          run: |
+            echo "BRANCH=$(git rev-parse --abbrev-ref HEAD)" >> $GITHUB_ENV
+            echo "BOOTSTRAP_UTILS_DIR=${PWD}/myutils" >> $GITHUB_ENV
+            echo "UTILS_DIR=${PWD}/quick-print-admin/myutils" >> $GITHUB_ENV
+            echo "WORK_ROOT_DIR=${PWD}/quick-print-admin" >> $GITHUB_ENV
+            echo "==========="
+            echo $(git rev-parse --abbrev-ref HEAD)
+            echo "==========="
+
+        - name: Prepare quickprint-admin workspace
+          env:
+            MYUSER_TOKEN: ${{ secrets.MYUSER_TOKEN }}
+          run: |
+            echo "export BRANCH=$BRANCH" > ./myutils/.clone_code.env
+            echo "export UTILS_DIR=$BOOTSTRAP_UTILS_DIR" >> ./myutils/.clone_code.env
+            cat ./myutils/.clone_code.env
+            bash ./myutils/quickprint/scripts/clone_code.sh ./myutils/.clone_code.env
+  
+        - name: Generate JENKINS.env
+          run: |
+            echo "export BRANCH=$BRANCH " >> $WORK_ROOT_DIR/.JENKINS.env
+            echo "export UTILS_DIR=$UTILS_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+            echo "export WORK_ROOT_DIR=$WORK_ROOT_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+            cat $WORK_ROOT_DIR/.JENKINS.env
+          working-directory: ./quick-print-admin
+  
+  
+        - name: Set SSH
+          env:
+            KEY: ${{ secrets.SSH_KEY }}
+            # HOST: ${{ secrets.HOST }}
+            # USER: ${{ secrets.USER }}
+            # PROT: ${{ secrets.PROT }}
+            # MKDIRTEST: ${{ secrets.MKDIRTEST }}
+          run: |
+            echo $KEY
+            mkdir -p ~/.ssh/ && echo "$KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan github.com >> ~/.ssh/known_hosts
+            
+        - name: Deploy 
+          run: |
+            bash $WORK_ROOT_DIR/myutils/quickprint/scripts/quickprint/docker_deploy.sh $WORK_ROOT_DIR/.JENKINS.env
+
+
+
+        - name: Check Status
+          if: ${{ success() }}
+          shell: pwsh
+          run: |
+            $repoName = $env:GITHUB_REPOSITORY.Split('/')[-1]
+            
+            Write-Host "Workflow succeeded for $repoName!"
+            dding "github action success :) for quickprint"
+          
+
+        - name: Check Status
+          if: ${{ failure() }}
+          shell: pwsh
+          run: |
+            $repoName = $env:GITHUB_REPOSITORY.Split('/')[-1]
+            Write-Host "Workflow failed for $repoName!"
+            dding "github action fail :( quickprint"
