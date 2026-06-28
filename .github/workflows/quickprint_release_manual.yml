@@ -355,7 +355,6 @@ jobs:
             script: |
               const owner = context.repo.owner;
               const repo = context.repo.repo;
-              const workflowId = 'quickprint_release_manual.yml';
               const currentRunId = context.runId;
 
               const { data: currentRun } = await github.rest.actions.getWorkflowRun({
@@ -364,10 +363,9 @@ jobs:
                 run_id: currentRunId,
               });
 
-              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
                 owner,
                 repo,
-                workflow_id: workflowId,
                 per_page: 100,
               });
 
@@ -382,7 +380,7 @@ jobs:
                 return new Date(run.created_at) < currentCreatedAt;
               });
 
-              core.info(`Deleting ${staleRuns.length} old completed workflow runs`);
+              core.info(`Deleting ${staleRuns.length} old completed workflow runs across the repository`);
 
               for (const run of staleRuns) {
                 core.info(`Deleting run ${run.id} created at ${run.created_at}`);
