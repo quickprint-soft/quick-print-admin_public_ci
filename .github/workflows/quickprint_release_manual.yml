@@ -192,6 +192,10 @@ jobs:
           make build-server-local
         working-directory: ./quick-print-admin
 
+      - name: Build agent
+        run: |
+          bash ./quick-print-admin/myutils/quickprint/scripts/build_agent.sh $WORK_ROOT_DIR/.JENKINS.env
+
       # - name: Download dependencies
       #   run: |
       #     go get -v -t -d ./...
@@ -227,6 +231,10 @@ jobs:
       - name: publish server
         run: |
           bash ./quick-print-admin/myutils/quickprint/scripts/publish_server.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: publish agent
+        run: |
+          bash ./quick-print-admin/myutils/quickprint/scripts/publish_agent.sh $WORK_ROOT_DIR/.JENKINS.env
 
 
 
