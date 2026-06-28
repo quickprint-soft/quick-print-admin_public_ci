@@ -1,0 +1,91 @@
+name: QuickPrint Release Manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: Branch to build from quick-print-admin
+        required: true
+        default: main
+        type: string
+
+concurrency:
+  group: quickprint-release-manual-${{ github.event.inputs.target_branch || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.MYUSER_TOKEN }}
+      MYUSER_TOKEN: ${{ secrets.MYUSER_TOKEN }}
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Clone myutils
+        run: |
+          git clone https://oauth2:${{ secrets.CHARLES_GITHUB_TOKEN }}@github.com/charlessoft/myutils.git ./myutils
+
+      - name: Prepare branch env
+        run: |
+          CURRENT_BRANCH="${{ github.event.inputs.target_branch }}"
+          echo "BRANCH=refs/heads/${CURRENT_BRANCH}" >> $GITHUB_ENV
+          echo "BOOTSTRAP_UTILS_DIR=${PWD}/myutils" >> $GITHUB_ENV
+          echo "UTILS_DIR=${PWD}/quick-print-admin/myutils" >> $GITHUB_ENV
+          echo "WORK_ROOT_DIR=${PWD}/quick-print-admin" >> $GITHUB_ENV
+
+      - name: Prepare quickprint-admin workspace
+        run: |
+          echo "export BRANCH=$BRANCH" > ./myutils/.clone_code.env
+          echo "export UTILS_DIR=$BOOTSTRAP_UTILS_DIR" >> ./myutils/.clone_code.env
+          echo "export MYUSER_TOKEN=${{ secrets.MYUSER_TOKEN }}" >> ./myutils/.clone_code.env
+          bash ./myutils/quickprint/scripts/clone_code.sh ./myutils/.clone_code.env
+
+      - name: Generate JENKINS.env
+        run: |
+          echo "export BRANCH=$BRANCH" >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export UTILS_DIR=$UTILS_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export WORK_ROOT_DIR=$WORK_ROOT_DIR" >> $WORK_ROOT_DIR/.JENKINS.env
+          echo "export MYUSER_TOKEN=${{ secrets.MYUSER_TOKEN }}" >> $WORK_ROOT_DIR/.JENKINS.env
+          cat $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Prepare web metadata
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_web.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Build web
+        run: |
+          npm install
+          npm run build
+        working-directory: ./quick-print-admin/web
+
+      - name: Publish web
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_web.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Build server
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_server.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Publish server
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_server.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Build agent
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/build_agent.sh $WORK_ROOT_DIR/.JENKINS.env
+
+      - name: Publish agent
+        run: |
+          bash $WORK_ROOT_DIR/myutils/quickprint/scripts/publish_agent.sh $WORK_ROOT_DIR/.JENKINS.env
